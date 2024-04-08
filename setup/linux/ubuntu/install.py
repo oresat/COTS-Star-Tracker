@@ -32,7 +32,10 @@ if usr_in != 'y' and usr_in != 'yes' and usr_in != 'heck yeah':
 # install/update system stuff
 os.system('sudo apt-get --yes update')
 os.system('sudo apt-get --yes upgrade')
-os.system('sudo apt-get --yes dist-upgrade')
+
+# potential to compromise system 
+#os.system('sudo apt-get --yes dist-upgrade')
+
 os.system('sudo apt-get --yes install gfortran')
 os.system('sudo apt-get --yes install libblas-dev') #scipy req
 
