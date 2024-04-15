@@ -30,10 +30,16 @@ if usr_in != 'y' and usr_in != 'yes' and usr_in != 'heck yeah':
 
 
 # install/update system stuff
+<<<<<<< Updated upstream
 os.system('sudo apt-get --yes update')
 os.system('sudo apt-get --yes upgrade')
 
 # potential to compromise system 
+=======
+# potential to compromise system
+#os.system("sudo apt-get --yes update")
+#os.system("sudo apt-get --yes upgrade")
+>>>>>>> Stashed changes
 #os.system('sudo apt-get --yes dist-upgrade')
 
 os.system('sudo apt-get --yes install gfortran')

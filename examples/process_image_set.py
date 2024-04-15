@@ -19,10 +19,51 @@ import time
 import psutil
 import subprocess
 import numpy as np
+import pandas as pd                                                             
+from scipy.spatial.transform import Rotation as R  
 from datetime import datetime
 from star_tracker import main
 from star_tracker.cam_matrix import *
 from star_tracker.array_transformations import *
+
+import io
+
+cols = 1280
+rows = 960
+pixels = cols * rows
+capture_file = ""
+
+path="/dev/prucam"
+
+
+# open up the prucam char device
+fd = os.open(path, os.O_RDWR)
+fio = io.FileIO(fd, closefd = False)
+
+num_captures = 1
+for x in range(num_captures):
+    # make buffer to read into
+    imgbuf = bytearray(pixels)
+
+    # read from prucam into buffer
+    fio.readinto(imgbuf)
+
+    # read image bytes into ndarray
+    img = np.frombuffer(imgbuf, dtype=np.uint8).reshape(rows, cols)
+
+    # do bayer color conversion. For monochrome/raw image, comment out
+    img = cv2.cvtColor(img, cv2.COLOR_BayerBG2BGR)
+
+    # json encode image
+    ok, img = cv2.imencode('.png', img)
+    if not(ok):
+        raise BaseException("encoding error")
+
+    capture_file = ('capture' + str(x) + '.png')
+
+    # write image
+    with open(capture_file, 'wb') as f:
+        f.write(img)
 
 ################################
 #USER INPUT
@@ -40,17 +81,24 @@ VERBOSE = True # set True for prints on results
 graphics = True # set True for graphics throughout the solve process
 
 
-data_path = '' # full path to your data
-image_path = '' # full path to your images
-cam_config_file_path = '' # full path (including filename) of your cam config file
-darkframe_file_path = '' # full path (including filename) of your darkframe file
-image_extension = ".jpg" # the image extension to search for in the data_path directory
+data_path = '/home/debian/oresat-star-tracker-software/oresat_star_tracker/cots-Star-Tracker-master/data/' # full path to your data
+#image_path = '/Users/kyleklein/Desktop/psas/cots/py_src/tools/camera_calibration/tetra/img_data/' # full path to your images
+image_path = '.'
+
+cam_config_file_path = '/home/debian/oresat-star-tracker-software/oresat_star_tracker/cots-Star-Tracker-master/data/cam_config/generic_cam_params.json' # full path (including filename) of your cam config file
+darkframe_file_path = '/home/debian/oresat-star-tracker-software/oresat_star_tracker/cots-Star-Tracker-master/py_src/tools/camera_calibration/tetra/img_data/autogen_darkframe.jpg' # full path (including filename) of your darkframe file
+image_extension = ".png" # the image extension to search for in the data_path directory
 cat_prefix ='' # if the catalog has a prefix, define it here
 
 ################################
 #SUPPORT FUNCTIONS
 ################################
-
+def convert_quaternion(sequence, x, y, z, w, degrees):                      
+    r = R.from_quat([x,y,z,w])                                              
+    r_q = r.as_quat()                                                       
+    r_m = r.as_matrix()                                                     
+    r_e = r.as_euler(sequence,degrees)                                      
+    return r_q, r_m, r_e  
 
 ################################
 #MAIN CODE
@@ -87,76 +135,89 @@ qv0 = []
 qv1 = []
 qv2 = []
 
-# create list of all images in target dir
-total_start = time.time()
-dir_contents = os.listdir(data_path)
 image_names = []
 
-for item in dir_contents:
-    if image_extension in item:
-        image_names+=[os.path.join(os.path.abspath(data_path),item)]
+# create list of all images in target dir
+#---------------------------------------
+#total_start = time.time()
+#dir_contents = os.listdir(image_path)
 
-for image_filename in image_names:
+#for item in dir_contents:
+#    if image_extension in item:
+#        image_names+=[os.path.join(os.path.abspath(image_path),item)]
 
-    image_name += [image_filename]
-    print("===================================================")
-    print(image_filename)
+#for image_filename in image_names:
 
-    #run star tracker
-    solve_start_time = time.time()
+#    image_name += [image_filename]
+#    print("===================================================")
+#    print(image_filename)
+#----------------------------------------
 
-    q_est, idmatch, nmatches, x_obs, rtrnd_img = main.star_tracker(
-            image_filename, cam_file, m=m, q=q, x_cat=x_cat, k=k, indexed_star_pairs=indexed_star_pairs, darkframe_file=darkframe_file_path, 
-            min_star_area=min_star_area, max_star_area=max_star_area, isa_thresh=isa_thresh, nmatch=nmatch, n_stars=max_num_stars_to_process,
-            low_thresh_pxl_intensity=low_thresh_pxl_intensity,hi_thresh_pxl_intensity=hi_thresh_pxl_intensity,graphics=graphics,verbose=VERBOSE)
+# single straight from capture file
+image_filename = capture_file
 
+#run star tracker
+solve_start_time = time.time()
 
-    solve_time += [time.time()-solve_start_time]
+q_est, idmatch, nmatches, x_obs, rtrnd_img = main.star_tracker(
+        image_filename, cam_file, m=m, q=q, x_cat=x_cat, k=k, indexed_star_pairs=indexed_star_pairs, darkframe_file=darkframe_file_path, 
+        min_star_area=min_star_area, max_star_area=max_star_area, isa_thresh=isa_thresh, nmatch=nmatch, n_stars=max_num_stars_to_process,
+        low_thresh_pxl_intensity=low_thresh_pxl_intensity,hi_thresh_pxl_intensity=hi_thresh_pxl_intensity,graphics=graphics,verbose=VERBOSE)
 
-    #collect data
-    try:
-        assert not np.any(np.isnan(q_est))
-        if VERBOSE:
-            print('est q: ' + str(q_est)+'\n')
-        qs += [q_est[3]]
-        qv0 += [q_est[0]]
-        qv1 += [q_est[1]]
-        qv2 += [q_est[2]]
-    except AssertionError:
-        if VERBOSE:
-            print('NO VALID STARS FOUND\n')
-        qs += [999]
-        qv0 += [999]
-        qv1 += [999]
-        qv2 += [999]
+# remove captured image after processing
+os.remove(image_filename)
 
+solve_time += [time.time()-solve_start_time]
 
+# collect data
+try:
+    assert not np.any(np.isnan(q_est))
+    if VERBOSE:
+        print('est q: ' + str(q_est)+'\n')
+    qs += [q_est[3]]
+    qv0 += [q_est[0]]
+    qv1 += [q_est[1]]
+    qv2 += [q_est[2]]
+except AssertionError:
+    if VERBOSE:
+        print('NO VALID STARS FOUND\n')
+    qs += [999]
+    qv0 += [999]
+    qv1 += [999]
+    qv2 += [999]
 
-    ttime += [time.time()]
-    sram  += [psutil.virtual_memory().percent]
-    #scpu  += [psutil.cpu_percent(2)]
-    scpu  += [psutil.cpu_percent()]
+# get quaternions for one file
+the_length = len(qs)
+q_matrix_x = qv0
+q_matrix_y = qv1
+q_matrix_z = qv2
+q_matrix_w = qs
 
+euler_matrix = np.zeros([the_length,3])
 
-data = {'image name':image_name,'time':ttime,'RAM':sram,'CPU':scpu,'image solve time (s)':solve_time, 'qs':qs,'qv0':qv0,'qv1':qv1,'qv2':qv2}
+# convert quaternions to attitude info
+for i in range(the_length):
 
-now = str(datetime.now())
-now = now.split('.')
-now = now[0]
-now = now.replace(' ','_')
-now = now.replace(':','-')
+    if (q_matrix_x[i] == 999) or (q_matrix_y[i] == 999) or (q_matrix_z[i] == 999) or (q_matrix_w[i] == 999):
+        euler_matrix[i,:] = np.array([0,0,0])
 
-#write stuff
-keys=sorted(data.keys())
-filename = now+'_data_file_nm-'+str(nmatch)+'_pxl-'+str(starMatchPixelTol)+'.csv'
-with open(filename,'w', newline='') as csv_file:
-             writer=csv.writer(csv_file)
-             writer.writerow(keys)
-             writer.writerows(zip(*[data[key] for  key in keys]))
+    else:
+        euler_matrix[i] = convert_quaternion('ZXZ', q_matrix_x[i], q_matrix_y[i], q_matrix_z[i], q_matrix_w[i], degrees=True)[2]
+        euler_matrix[i,0] = euler_matrix[i,0] - 90
+        euler_matrix[i,1] = 90 - euler_matrix[i,1]
+        euler_matrix[i,2] = euler_matrix[i,2] + 180
 
-print("\n\n took " + str(time.time()-total_start) + " seconds to complete \n\n")
-print("data saved to: " +filename)
+# return ra, dec, roll
+#return euler_matrix[:,0], euler_matrix[:,1], euler_matrix[:,2]
 
-print("\n\nTHE END\n\n")
+###############################################################################
+# Stores data in a pandas data frame and saves it in an excel file
 
+# single captured image
+df = pd.DataFrame((image_names,q_matrix_x,q_matrix_y,q_matrix_z ,q_matrix_w ,euler_matrix[:,0],euler_matrix[:,1],euler_matrix[:,2]),('File','Q,x','Q,y','Q,z','Q,w','ra3','dec1','roll3'),(np.linspace(1,1,1))).T
+
+# image(s) from disk
+#df = pd.DataFrame((image_names,q_matrix_x,q_matrix_y,q_matrix_z ,q_matrix_w ,euler_matrix[:,0],euler_matrix[:,1],euler_matrix[:,2]),('File','Q,x','Q,y','Q,z','Q,w','ra3','dec1','roll3'),(np.linspace(1,len(image_names),len(image_names)))).T
+
+df.to_csv(image_path+"_converted.csv")
 
